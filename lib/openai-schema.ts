@@ -1,3 +1,5 @@
+import { SUPPORTED_DOCUMENT_TYPES } from "@/lib/document-types";
+
 const nullableText = { type: ["string", "null"] } as const;
 const finding = {
   type: "object",
@@ -11,7 +13,7 @@ export const analysisJsonSchema = {
   additionalProperties: false,
   required: ["documentType", "confidence", "summary", "documentPurpose", "riskScore", "riskLevel", "pros", "cons", "riskAreas", "importantPoints", "painPoints", "missingInformation", "questionsToAsk", "actionItems"],
   properties: {
-    documentType: { type: "string", enum: ["Insurance Policy", "Employment Contract", "Rental Agreement", "NDA", "Privacy Policy", "Terms & Conditions", "Loan Agreement", "Legal Notice", "Other"] },
+    documentType: { type: "string", enum: SUPPORTED_DOCUMENT_TYPES },
     confidence: { type: "number", minimum: 0, maximum: 100 },
     summary: nullableText,
     documentPurpose: nullableText,
