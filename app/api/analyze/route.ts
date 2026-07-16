@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import type { ChatCompletionUserMessageParam } from "openai/resources/chat/completions";
 import pdf from "pdf-parse/lib/pdf-parse.js";
 import { NextResponse } from "next/server";
 import { analysisSchema } from "@/lib/schema";
@@ -17,18 +18,48 @@ export const runtime = "nodejs";
 const MAX_BYTES = 15 * 1024 * 1024;
 const MAX_CHARS = 120_000;
 const MAX_CLASSIFICATION_CHARS = 40_000;
+const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
+
+function imageContent(dataUrl: string): ChatCompletionUserMessageParam["content"] {
+  return [
+    {
+      type: "text",
+      text: "The uploaded document is an image. Read only the text and document content that are clearly visible in it."
+    },
+    { type: "image_url", image_url: { url: dataUrl, detail: "high" } }
+  ];
+}
 
 export async function POST(request: Request) {
   try {
     const form = await request.formData();
     const file = form.get("file");
-    if (!(file instanceof File) || file.type !== "application/pdf") return NextResponse.json({ error: "Upload a PDF file." }, { status: 400 });
-    if (file.size === 0 || file.size > MAX_BYTES) return NextResponse.json({ error: "PDF must be between 1 byte and 15 MB." }, { status: 400 });
+    if (!(file instanceof File)) return NextResponse.json({ error: "Upload a PDF, JPG, PNG, or WebP file." }, { status: 400 });
+    const isPdf = file.type === "application/pdf";
+    const isImage = SUPPORTED_IMAGE_TYPES.has(file.type);
+    if (!isPdf && !isImage) return NextResponse.json({ error: "Upload a PDF, JPG, PNG, or WebP file." }, { status: 400 });
+    if (file.size === 0 || file.size > MAX_BYTES) return NextResponse.json({ error: "File must be between 1 byte and 15 MB." }, { status: 400 });
     if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Server is missing OPENAI_API_KEY." }, { status: 500 });
 
-    const data = await pdf(Buffer.from(await file.arrayBuffer()));
-    const extractedText = data.text.replace(/\s+/g, " ").trim();
-    if (extractedText.length < 40) return NextResponse.json({ error: "No readable text was found. This may be a scanned PDF; OCR is required." }, { status: 422 });
+    const fileBuffer = Buffer.from(await file.arrayBuffer());
+    let eligibilityContent: ChatCompletionUserMessageParam["content"];
+    let analysisContent: ChatCompletionUserMessageParam["content"];
+    if (isPdf) {
+      const data = await pdf(fileBuffer);
+      const extractedText = data.text.replace(/\s+/g, " ").trim();
+      if (extractedText.length < 40) {
+        return NextResponse.json(
+          { error: "No readable text was found. Upload a text-based PDF or a clear JPG, PNG, or WebP image." },
+          { status: 422 }
+        );
+      }
+      eligibilityContent = extractedText.slice(0, MAX_CLASSIFICATION_CHARS);
+      analysisContent = extractedText.slice(0, MAX_CHARS);
+    } else {
+      const dataUrl = `data:${file.type};base64,${fileBuffer.toString("base64")}`;
+      eligibilityContent = imageContent(dataUrl);
+      analysisContent = imageContent(dataUrl);
+    }
 
     const client = new OpenAI({
       apiKey: process.env.OPENAI_API_KEY,
@@ -43,7 +74,7 @@ export async function POST(request: Request) {
       response_format: { type: "json_schema", json_schema: { name: "document_eligibility", strict: true, schema: eligibilityJsonSchema } },
       messages: [
         { role: "system", content: ELIGIBILITY_INSTRUCTIONS },
-        { role: "user", content: extractedText.slice(0, MAX_CLASSIFICATION_CHARS) }
+        { role: "user", content: eligibilityContent }
       ]
     });
     const rawEligibility = eligibilityCompletion.choices[0]?.message?.content;
@@ -58,7 +89,7 @@ export async function POST(request: Request) {
       temperature: 0.1,
       max_tokens: 2500,
       response_format: { type: "json_schema", json_schema: { name: "document_analysis", strict: true, schema: analysisJsonSchema } },
-      messages: [{ role: "system", content: ANALYSIS_INSTRUCTIONS }, { role: "user", content: extractedText.slice(0, MAX_CHARS) }]
+      messages: [{ role: "system", content: ANALYSIS_INSTRUCTIONS }, { role: "user", content: analysisContent }]
     });
     const raw = completion.choices[0]?.message?.content;
     if (!raw) throw new Error("The model returned no analysis.");
@@ -76,7 +107,7 @@ export async function POST(request: Request) {
       console.error("Model response did not match the analysis schema", error.issues);
       return NextResponse.json({ error: "The analysis service returned an invalid response. Please try again." }, { status: 502 });
     }
-    const message = error instanceof Error && error.message.includes("JSON") ? "Analysis could not be validated. Please try again." : "We could not analyze this document. Please try a different PDF.";
+    const message = error instanceof Error && error.message.includes("JSON") ? "Analysis could not be validated. Please try again." : "We could not analyze this document. Please try a different supported file.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
