@@ -13,7 +13,8 @@ import {
 } from "@/lib/eligibility";
 import {
   DocumentIngestionError,
-  ingestDocument
+  ingestDocument,
+  type IngestedDocument
 } from "@/lib/document-ingestion";
 import {
   assertDocumentTokenConfigured,
@@ -43,6 +44,22 @@ function imageContent(dataUrl: string): ChatCompletionUserMessageParam["content"
   ];
 }
 
+function pdfContent(document: Extract<IngestedDocument, { kind: "pdf" }>): ChatCompletionUserMessageParam["content"] {
+  return [
+    {
+      type: "text",
+      text: "The uploaded document is an image-based PDF. Read only the text and document content that are clearly visible in its pages."
+    },
+    {
+      type: "file",
+      file: {
+        filename: document.fileName,
+        file_data: document.dataUrl
+      }
+    }
+  ];
+}
+
 export async function POST(request: Request) {
   try {
     enforceSameOrigin(request);
@@ -60,9 +77,12 @@ export async function POST(request: Request) {
     if (document.kind === "text") {
       eligibilityContent = document.text.slice(0, MAX_CLASSIFICATION_CHARS);
       analysisContent = document.text.slice(0, MAX_CHARS);
-    } else {
+    } else if (document.kind === "image") {
       eligibilityContent = imageContent(document.dataUrl);
       analysisContent = imageContent(document.dataUrl);
+    } else {
+      eligibilityContent = pdfContent(document);
+      analysisContent = pdfContent(document);
     }
 
     const client = new OpenAI({
