@@ -9,3 +9,7 @@ export const analysisSchema = z.object({
   missingInformation: z.array(z.object({ field: text, whyImportant: text })), questionsToAsk: z.array(text), actionItems: z.array(text)
 });
 export type Analysis = z.infer<typeof analysisSchema>;
+export type AnalysisResponse = Analysis & {
+  documentToken: string;
+  documentTokenExpiresAt: string;
+};

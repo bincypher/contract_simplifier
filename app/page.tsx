@@ -1,7 +1,8 @@
 "use client";
 
 import { ChangeEvent, DragEvent, useRef, useState } from "react";
-import type { Analysis } from "@/lib/schema";
+import type { AnalysisResponse } from "@/lib/schema";
+import { DocumentChat } from "@/components/DocumentChat";
 
 const valid = (value: string | null) => value || "Not specified in the document.";
 const ACCEPTED_FILE_TYPES = new Set(["application/pdf", "image/jpeg", "image/png", "image/webp"]);
@@ -15,9 +16,9 @@ function ItemList({ items, empty = "No actionable findings identified." }: { ite
 }
 
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null); const [result, setResult] = useState<Analysis | null>(null); const [error, setError] = useState(""); const [loading, setLoading] = useState(false); const input = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null); const [result, setResult] = useState<AnalysisResponse | null>(null); const [error, setError] = useState(""); const [loading, setLoading] = useState(false); const input = useRef<HTMLInputElement>(null);
   const choose = (candidate?: File) => { setError(""); setResult(null); if (!candidate) return; if (!ACCEPTED_FILE_TYPES.has(candidate.type)) return setError("Please choose a PDF, JPG, PNG, or WebP document."); if (candidate.size > 15 * 1024 * 1024) return setError("This file exceeds the 15 MB limit."); setFile(candidate); };
-  const upload = async () => { if (!file) return; setLoading(true); setError(""); const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 90_000); try { const form = new FormData(); form.append("file", file); const response = await fetch("/api/analyze", { method: "POST", body: form, signal: controller.signal }); const responseText = await response.text(); let body: Analysis | { error?: string }; try { body = JSON.parse(responseText); } catch { throw new Error(`The analysis service returned an unexpected response (${response.status}). Check the server terminal for the underlying error.`); } if (!response.ok) throw new Error("error" in body ? body.error || "Analysis failed." : "Analysis failed."); setResult(body as Analysis); } catch (e) { setError(e instanceof DOMException && e.name === "AbortError" ? "Analysis timed out after 90 seconds. Please try again shortly." : e instanceof Error ? e.message : "Analysis failed."); } finally { window.clearTimeout(timeout); setLoading(false); } };
+  const upload = async () => { if (!file) return; setLoading(true); setError(""); const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 90_000); try { const form = new FormData(); form.append("file", file); const response = await fetch("/api/analyze", { method: "POST", body: form, signal: controller.signal }); const responseText = await response.text(); let body: AnalysisResponse | { error?: string }; try { body = JSON.parse(responseText); } catch { throw new Error(`The analysis service returned an unexpected response (${response.status}). Check the server terminal for the underlying error.`); } if (!response.ok) throw new Error("error" in body ? body.error || "Analysis failed." : "Analysis failed."); setResult(body as AnalysisResponse); } catch (e) { setError(e instanceof DOMException && e.name === "AbortError" ? "Analysis timed out after 90 seconds. Please try again shortly." : e instanceof Error ? e.message : "Analysis failed."); } finally { window.clearTimeout(timeout); setLoading(false); } };
   const onDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); choose(event.dataTransfer.files[0]); };
   const a = result;
   return <main>
@@ -32,6 +33,7 @@ export default function Home() {
       <div className="grid"><Section title="Potential drawbacks" count={a.cons.length}><ItemList items={a.cons} /></Section><Section title="Information to clarify" count={a.missingInformation.length}>{a.missingInformation.length ? <div className="item-list">{a.missingInformation.map((item, index) => <article className="item" key={`${item.field}-${index}`}><h3>{valid(item.field)}</h3><p>{valid(item.whyImportant)}</p></article>)}</div> : <p className="empty">No missing information identified.</p>}</Section></div>
       <div className="grid"><Section title="Questions to ask" count={a.questionsToAsk.length}>{a.questionsToAsk.length ? <ol className="questions">{a.questionsToAsk.map((q, i) => <li key={i}>{valid(q)}</li>)}</ol> : <p className="empty">No questions generated.</p>}</Section><Section title="Suggested actions" count={a.actionItems.length}>{a.actionItems.length ? <ol className="questions">{a.actionItems.map((q, i) => <li key={i}>{valid(q)}</li>)}</ol> : <p className="empty">No actions generated.</p>}</Section></div>
     </div>}
+    {a && file && <DocumentChat file={file} documentToken={a.documentToken} documentTokenExpiresAt={a.documentTokenExpiresAt} documentType={a.documentType} suggestedQuestions={a.questionsToAsk.filter((question): question is string => Boolean(question)).slice(0, 3)} />}
     <footer id="privacy"><span>✦ Clarity</span><p>Your uploaded file is used only to produce this analysis. Keep your API key on the server.</p></footer>
   </main>;
 }

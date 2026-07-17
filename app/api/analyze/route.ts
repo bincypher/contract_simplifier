@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 import type { ChatCompletionUserMessageParam } from "openai/resources/chat/completions";
-import pdf from "pdf-parse/lib/pdf-parse.js";
 import { NextResponse } from "next/server";
 import { analysisSchema } from "@/lib/schema";
 import { ANALYSIS_INSTRUCTIONS } from "@/lib/prompt";
@@ -12,13 +11,27 @@ import {
   isEligibleDocument,
   UNSUPPORTED_DOCUMENT_MESSAGE
 } from "@/lib/eligibility";
+import {
+  DocumentIngestionError,
+  ingestDocument
+} from "@/lib/document-ingestion";
+import {
+  assertDocumentTokenConfigured,
+  createDocumentToken,
+  DocumentTokenError
+} from "@/lib/document-token";
+import {
+  enforceContentLength,
+  enforceRateLimit,
+  enforceSameOrigin,
+  RequestGuardError
+} from "@/lib/request-guard";
 import { z } from "zod";
 
 export const runtime = "nodejs";
-const MAX_BYTES = 15 * 1024 * 1024;
+export const dynamic = "force-dynamic";
 const MAX_CHARS = 120_000;
 const MAX_CLASSIFICATION_CHARS = 40_000;
-const SUPPORTED_IMAGE_TYPES = new Set(["image/jpeg", "image/png", "image/webp"]);
 
 function imageContent(dataUrl: string): ChatCompletionUserMessageParam["content"] {
   return [
@@ -32,33 +45,24 @@ function imageContent(dataUrl: string): ChatCompletionUserMessageParam["content"
 
 export async function POST(request: Request) {
   try {
+    enforceSameOrigin(request);
+    enforceContentLength(request, 16 * 1024 * 1024);
+    enforceRateLimit(request, "analyze", 10, 10 * 60 * 1000);
     const form = await request.formData();
-    const file = form.get("file");
-    if (!(file instanceof File)) return NextResponse.json({ error: "Upload a PDF, JPG, PNG, or WebP file." }, { status: 400 });
-    const isPdf = file.type === "application/pdf";
-    const isImage = SUPPORTED_IMAGE_TYPES.has(file.type);
-    if (!isPdf && !isImage) return NextResponse.json({ error: "Upload a PDF, JPG, PNG, or WebP file." }, { status: 400 });
-    if (file.size === 0 || file.size > MAX_BYTES) return NextResponse.json({ error: "File must be between 1 byte and 15 MB." }, { status: 400 });
-    if (!process.env.OPENAI_API_KEY) return NextResponse.json({ error: "Server is missing OPENAI_API_KEY." }, { status: 500 });
+    const document = await ingestDocument(form.get("file"));
+    if (!process.env.OPENAI_API_KEY) {
+      return NextResponse.json({ error: "The analysis service is not configured." }, { status: 503 });
+    }
+    assertDocumentTokenConfigured();
 
-    const fileBuffer = Buffer.from(await file.arrayBuffer());
     let eligibilityContent: ChatCompletionUserMessageParam["content"];
     let analysisContent: ChatCompletionUserMessageParam["content"];
-    if (isPdf) {
-      const data = await pdf(fileBuffer);
-      const extractedText = data.text.replace(/\s+/g, " ").trim();
-      if (extractedText.length < 40) {
-        return NextResponse.json(
-          { error: "No readable text was found. Upload a text-based PDF or a clear JPG, PNG, or WebP image." },
-          { status: 422 }
-        );
-      }
-      eligibilityContent = extractedText.slice(0, MAX_CLASSIFICATION_CHARS);
-      analysisContent = extractedText.slice(0, MAX_CHARS);
+    if (document.kind === "text") {
+      eligibilityContent = document.text.slice(0, MAX_CLASSIFICATION_CHARS);
+      analysisContent = document.text.slice(0, MAX_CHARS);
     } else {
-      const dataUrl = `data:${file.type};base64,${fileBuffer.toString("base64")}`;
-      eligibilityContent = imageContent(dataUrl);
-      analysisContent = imageContent(dataUrl);
+      eligibilityContent = imageContent(document.dataUrl);
+      analysisContent = imageContent(document.dataUrl);
     }
 
     const client = new OpenAI({
@@ -94,9 +98,32 @@ export async function POST(request: Request) {
     const raw = completion.choices[0]?.message?.content;
     if (!raw) throw new Error("The model returned no analysis.");
     const analysis = analysisSchema.parse(JSON.parse(raw));
-    return NextResponse.json(analysis);
+    const documentSession = createDocumentToken({
+      fingerprint: document.fingerprint,
+      documentType: analysis.documentType,
+      eligibilityConfidence: eligibility.confidence
+    });
+    return NextResponse.json({
+      ...analysis,
+      documentToken: documentSession.token,
+      documentTokenExpiresAt: documentSession.expiresAt
+    });
   } catch (error) {
-    console.error("Analysis failed", error);
+    if (error instanceof RequestGuardError) {
+      return NextResponse.json(
+        { error: error.message },
+        {
+          status: error.status,
+          headers: error.retryAfter ? { "Retry-After": String(error.retryAfter) } : undefined
+        }
+      );
+    }
+    if (error instanceof DocumentIngestionError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
+    if (error instanceof DocumentTokenError) {
+      return NextResponse.json({ error: error.message }, { status: error.status });
+    }
     if (error instanceof OpenAI.APIConnectionTimeoutError) {
       return NextResponse.json({ error: "The analysis service did not respond in time. Please try again shortly." }, { status: 504 });
     }
@@ -104,9 +131,10 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "The server cannot reach the analysis service. Verify outbound access to api.openai.com and try again." }, { status: 503 });
     }
     if (error instanceof z.ZodError) {
-      console.error("Model response did not match the analysis schema", error.issues);
+      console.error("Model response failed schema validation", error.issues.map(issue => issue.path.join(".")));
       return NextResponse.json({ error: "The analysis service returned an invalid response. Please try again." }, { status: 502 });
     }
+    console.error("Analysis failed", error instanceof Error ? error.name : "UnknownError");
     const message = error instanceof Error && error.message.includes("JSON") ? "Analysis could not be validated. Please try again." : "We could not analyze this document. Please try a different supported file.";
     return NextResponse.json({ error: message }, { status: 500 });
   }
