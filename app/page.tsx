@@ -34,6 +34,6 @@ export default function Home() {
       <div className="grid"><Section title="Questions to ask" count={a.questionsToAsk.length}>{a.questionsToAsk.length ? <ol className="questions">{a.questionsToAsk.map((q, i) => <li key={i}>{valid(q)}</li>)}</ol> : <p className="empty">No questions generated.</p>}</Section><Section title="Suggested actions" count={a.actionItems.length}>{a.actionItems.length ? <ol className="questions">{a.actionItems.map((q, i) => <li key={i}>{valid(q)}</li>)}</ol> : <p className="empty">No actions generated.</p>}</Section></div>
     </div>}
     {a && file && <DocumentChat file={file} documentToken={a.documentToken} documentTokenExpiresAt={a.documentTokenExpiresAt} documentType={a.documentType} suggestedQuestions={a.questionsToAsk.filter((question): question is string => Boolean(question)).slice(0, 3)} />}
-    <footer id="privacy"><span>✦ Clarity</span><p>Your uploaded file is used only to produce this analysis. Keep your API key on the server.</p></footer>
+    <footer id="privacy"><span>✦ Clarity</span><p>Your uploaded file is used only to produce this analysis.</p></footer>
   </main>;
 }
