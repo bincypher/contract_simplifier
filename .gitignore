@@ -1,25 +1,50 @@
-node_modules
+# Dependencies
+node_modules/
+
+# Environment & secrets
 .env
 .env.local
-.env.*
+.env.*.local
+
+# Next.js
 .next/
-.next/*
-.vercel
-.parcel-cache
-.turbo
-public/static
+out/
+.vercel/
+
+# Build & cache
+build/
+dist/
+coverage/
+.turbo/
+.parcel-cache/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
 .DS_Store
+Thumbs.db
+
+# Logs
+*.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
-coverage/
-build/
-dist/
-.vscode/
-.idea/
-*.log
-*.local
-tsconfig.tsbuildinfo
+
+# Archives
 *.tgz
 *.zip
+*.tar.gz
+
+# Agent / AI tooling
+.agents/
+
+# Project-specific: planning docs & test files (not source code)
+AI_Contract_Simplifier_Industry_Level*.md
+Policy Document*.pdf

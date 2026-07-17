@@ -201,7 +201,6 @@ export async function POST(request: Request) {
     if (process.env.NODE_ENV !== "production") console.debug("[chat] parsed answer:", parsed);
     return NextResponse.json(parsed);
   } catch (error) {
-    console.error('Chat caught error:', error instanceof Error ? error.stack || error.message : String(error));
     if (error instanceof RequestGuardError) return guardErrorResponse(error);
     if (error instanceof ChatRequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -222,6 +221,7 @@ export async function POST(request: Request) {
       console.error("Chat model response failed schema validation", error.issues.map(issue => issue.path.join(".")));
       return NextResponse.json({ error: "The chat service returned an invalid response. Please try again." }, { status: 502 });
     }
+    console.error("Chat failed", error instanceof Error ? error.name : "UnknownError");
     const message = error instanceof Error && error.message.includes("JSON")
       ? "The chat response could not be validated. Please try again."
       : "We could not answer this document question. Please try again.";
