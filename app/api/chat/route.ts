@@ -139,8 +139,15 @@ export async function POST(request: Request) {
       ]
     });
     const rawRelevance = relevanceCompletion.choices[0]?.message?.content;
+    // Debug: surface raw relevance response for troubleshooting
+    console.debug("[chat] rawRelevance:", rawRelevance);
     if (!rawRelevance) throw new Error("The model returned no relevance decision.");
-    const relevance = chatRelevanceSchema.parse(JSON.parse(rawRelevance));
+    let relevance = chatRelevanceSchema.parse(JSON.parse(rawRelevance));
+    // Normalize confidence: model may return 0-1 floats instead of 0-100 percentages.
+    if (typeof relevance.confidence === "number" && relevance.confidence <= 1) {
+      relevance = { ...relevance, confidence: relevance.confidence * 100 };
+    }
+    console.debug("[chat] parsed relevance:", relevance);
     if (
       !relevance.isDocumentRelated ||
       relevance.category === "unsupported" ||
@@ -168,9 +175,18 @@ export async function POST(request: Request) {
       ]
     });
     const rawAnswer = answerCompletion.choices[0]?.message?.content;
+    // Debug: surface raw answer response for troubleshooting
+    console.debug("[chat] rawAnswer:", rawAnswer);
     if (!rawAnswer) throw new Error("The model returned no document answer.");
-    return NextResponse.json(chatAnswerSchema.parse(JSON.parse(rawAnswer)));
+    let parsed = chatAnswerSchema.parse(JSON.parse(rawAnswer));
+    // Normalize confidence if model returned 0-1 float
+    if (typeof parsed.confidence === "number" && parsed.confidence <= 1) {
+      parsed = { ...parsed, confidence: parsed.confidence * 100 };
+    }
+    console.debug("[chat] parsed answer:", parsed);
+    return NextResponse.json(parsed);
   } catch (error) {
+    console.error('Chat caught error:', error instanceof Error ? error.stack || error.message : String(error));
     if (error instanceof RequestGuardError) return guardErrorResponse(error);
     if (error instanceof ChatRequestError) {
       return NextResponse.json({ error: error.message }, { status: error.status });
@@ -191,7 +207,6 @@ export async function POST(request: Request) {
       console.error("Chat model response failed schema validation", error.issues.map(issue => issue.path.join(".")));
       return NextResponse.json({ error: "The chat service returned an invalid response. Please try again." }, { status: 502 });
     }
-    console.error("Chat failed", error instanceof Error ? error.name : "UnknownError");
     const message = error instanceof Error && error.message.includes("JSON")
       ? "The chat response could not be validated. Please try again."
       : "We could not answer this document question. Please try again.";

@@ -83,7 +83,11 @@ export async function POST(request: Request) {
     });
     const rawEligibility = eligibilityCompletion.choices[0]?.message?.content;
     if (!rawEligibility) throw new Error("The model returned no eligibility decision.");
-    const eligibility = eligibilitySchema.parse(JSON.parse(rawEligibility));
+    let eligibility = eligibilitySchema.parse(JSON.parse(rawEligibility));
+    // Normalize confidence: models sometimes return 0-1 floats instead of 0-100.
+    if (typeof eligibility.confidence === "number" && eligibility.confidence <= 1) {
+      eligibility = { ...eligibility, confidence: eligibility.confidence * 100 };
+    }
     if (!isEligibleDocument(eligibility)) {
       return NextResponse.json({ error: UNSUPPORTED_DOCUMENT_MESSAGE }, { status: 422 });
     }
