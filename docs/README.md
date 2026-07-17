@@ -469,6 +469,6 @@ Copyright © 2026 Binayak Bidyasagar
 
 ## Author
 
-**Binayak Bidyasagar**
+**Binayak Bidyasagar** & **Rakesh Sahoo**
 
 Product: **Clarity — AI Document Analyzer** (v1.0.0)
