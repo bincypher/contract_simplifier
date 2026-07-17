@@ -154,15 +154,15 @@ export async function POST(request: Request) {
       ]
     });
     const rawRelevance = relevanceCompletion.choices[0]?.message?.content;
-    // Debug: surface raw relevance response for troubleshooting
-    console.debug("[chat] rawRelevance:", rawRelevance);
+    // Debug: surface raw relevance response for troubleshooting (non-production only)
+    if (process.env.NODE_ENV !== "production") console.debug("[chat] rawRelevance:", rawRelevance);
     if (!rawRelevance) throw new Error("The model returned no relevance decision.");
     let relevance = chatRelevanceSchema.parse(JSON.parse(rawRelevance));
     // Normalize confidence: model may return 0-1 floats instead of 0-100 percentages.
     if (typeof relevance.confidence === "number" && relevance.confidence <= 1) {
       relevance = { ...relevance, confidence: relevance.confidence * 100 };
     }
-    console.debug("[chat] parsed relevance:", relevance);
+    if (process.env.NODE_ENV !== "production") console.debug("[chat] parsed relevance:", relevance);
     if (
       !relevance.isDocumentRelated ||
       relevance.category === "unsupported" ||
@@ -190,15 +190,15 @@ export async function POST(request: Request) {
       ]
     });
     const rawAnswer = answerCompletion.choices[0]?.message?.content;
-    // Debug: surface raw answer response for troubleshooting
-    console.debug("[chat] rawAnswer:", rawAnswer);
+    // Debug: surface raw answer response for troubleshooting (non-production only)
+    if (process.env.NODE_ENV !== "production") console.debug("[chat] rawAnswer:", rawAnswer);
     if (!rawAnswer) throw new Error("The model returned no document answer.");
     let parsed = chatAnswerSchema.parse(JSON.parse(rawAnswer));
     // Normalize confidence if model returned 0-1 float
     if (typeof parsed.confidence === "number" && parsed.confidence <= 1) {
       parsed = { ...parsed, confidence: parsed.confidence * 100 };
     }
-    console.debug("[chat] parsed answer:", parsed);
+    if (process.env.NODE_ENV !== "production") console.debug("[chat] parsed answer:", parsed);
     return NextResponse.json(parsed);
   } catch (error) {
     console.error('Chat caught error:', error instanceof Error ? error.stack || error.message : String(error));
