@@ -57,6 +57,21 @@ function documentQuestionContent(
   if (document.kind === "text") {
     return `${context}\n\n<untrusted_document_content>\n${document.text.slice(0, MAX_DOCUMENT_CHARS)}\n</untrusted_document_content>`;
   }
+  if (document.kind === "pdf") {
+    return [
+      {
+        type: "text",
+        text: `${context}\n\nThe untrusted uploaded document is the image-based PDF supplied below. Read only clearly visible content.`
+      },
+      {
+        type: "file",
+        file: {
+          filename: document.fileName,
+          file_data: document.dataUrl
+        }
+      }
+    ];
+  }
   return [
     {
       type: "text",
@@ -213,4 +228,3 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

@@ -26,6 +26,14 @@ export type IngestedDocument =
       pageCount: number;
     }
   | {
+      kind: "pdf";
+      mimeType: "application/pdf";
+      fileName: string;
+      fingerprint: string;
+      dataUrl: string;
+      pageCount: number;
+    }
+  | {
       kind: "image";
       mimeType: "image/jpeg" | "image/png" | "image/webp";
       fileName: string;
@@ -219,10 +227,13 @@ export async function ingestDocument(file: FormDataEntryValue | null): Promise<I
         .replace(/\n{3,}/g, "\n\n")
         .trim();
       if (text.replace(/\[Page \d+\]/g, "").trim().length < MIN_READABLE_TEXT_CHARS) {
-        throw new DocumentIngestionError(
-          "No readable text was found. Upload a text-based PDF or a clear JPG, PNG, or WebP image.",
-          422
-        );
+        return {
+          kind: "pdf",
+          mimeType: "application/pdf",
+          ...common,
+          dataUrl: `data:application/pdf;base64,${buffer.toString("base64")}`,
+          pageCount: data.numpages
+        };
       }
       return {
         kind: "text",
