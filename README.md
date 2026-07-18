@@ -220,10 +220,10 @@ Clarity is fully optimized for Vercel.
 2. **Text Formats**: The system currently does not support DOCX or TXT files (only PDF and images).
 3. **OCR Scope**: Document ingestion falls back to visual LLM evaluation for scanned documents; there is no local OCR computation layer.
 4. **Volume Limits**: Contracts with text exceeding 120,000 characters (approx. 45-50 pages) are truncated.
+5. **Export Scope**: PDF reports include the current analysis and live policy-provider questions, but do not include the chat transcript.
 
 ### Future Roadmap
 - **User Accounts & Persistence**: Introduce OAuth2 providers and encrypted PostgreSQL database tables (e.g., via Supabase) to persist past document summaries and chat history.
-- **Exporting Options**: Generates download links for PDF and Word (`.docx`) analysis reports.
 - **Version Diff Analysis**: Compares revisions of two similar contracts and flags changes in liability, payment structures, or auto-renewals.
 - **Multi-language OCR**: Full operational supports for multi-language document loading and analysis.
 

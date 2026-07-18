@@ -1,6 +1,6 @@
 "use client";
 
-import { ChangeEvent, DragEvent, useRef, useState } from "react";
+import { ChangeEvent, DragEvent, useEffect, useRef, useState } from "react";
 import type { Analysis, AnalysisResponse } from "@/lib/schema";
 import { DocumentChat } from "@/components/DocumentChat";
 import { addProviderQuestion, mergeProviderQuestions } from "@/lib/chat-behavior";
@@ -25,7 +25,7 @@ function toChatAnalysis({
 }
 
 export default function Home() {
-  const [file, setFile] = useState<File | null>(null); const [result, setResult] = useState<AnalysisResponse | null>(null); const [providerQuestions, setProviderQuestions] = useState<string[]>([]); const [error, setError] = useState(""); const [loading, setLoading] = useState(false); const input = useRef<HTMLInputElement>(null);
+  const [file, setFile] = useState<File | null>(null); const [result, setResult] = useState<AnalysisResponse | null>(null); const [providerQuestions, setProviderQuestions] = useState<string[]>([]); const [error, setError] = useState(""); const [loading, setLoading] = useState(false); const [exporting, setExporting] = useState(false); const [exportError, setExportError] = useState(""); const input = useRef<HTMLInputElement>(null); const report = useRef<HTMLDivElement>(null); const chat = useRef<HTMLDivElement>(null);
   const choose = (candidate?: File) => { setError(""); setResult(null); setProviderQuestions([]); if (!candidate) return; if (!ACCEPTED_FILE_TYPES.has(candidate.type)) return setError("Please choose a PDF, JPG, PNG, or WebP document."); if (candidate.size > 15 * 1024 * 1024) return setError("This file exceeds the 15 MB limit."); setFile(candidate); };
   const upload = async () => { if (!file) return; setLoading(true); setError(""); const controller = new AbortController(); const timeout = window.setTimeout(() => controller.abort(), 90_000); try { const form = new FormData(); form.append("file", file); const response = await fetch("/api/analyze", { method: "POST", body: form, signal: controller.signal }); const responseText = await response.text(); let body: AnalysisResponse | { error?: string }; try { body = JSON.parse(responseText); } catch { throw new Error(`The analysis service returned an unexpected response (${response.status}). Check the server terminal for the underlying error.`); } if (!response.ok) throw new Error("error" in body ? body.error || "Analysis failed." : "Analysis failed."); const analysisResponse = body as AnalysisResponse; setResult(analysisResponse); setProviderQuestions(mergeProviderQuestions([], analysisResponse.questionsToAsk)); } catch (e) { setError(e instanceof DOMException && e.name === "AbortError" ? "Analysis timed out after 90 seconds. Please try again shortly." : e instanceof Error ? e.message : "Analysis failed."); } finally { window.clearTimeout(timeout); setLoading(false); } };
   const onDrop = (event: DragEvent<HTMLDivElement>) => { event.preventDefault(); choose(event.dataTransfer.files[0]); };
@@ -34,19 +34,52 @@ export default function Home() {
   const captureProviderQuestion = (question: string) => {
     setProviderQuestions(current => addProviderQuestion(current, question));
   };
+  useEffect(() => {
+    if (result) report.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [result]);
+  const downloadReport = async () => {
+    if (!chatAnalysis || exporting) return;
+    setExporting(true);
+    setExportError("");
+    try {
+      const response = await fetch("/api/export/pdf", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ analysis: chatAnalysis, fileName: file?.name })
+      });
+      if (!response.ok) {
+        const body = await response.json().catch(() => ({})) as { error?: string };
+        throw new Error(body.error || "The report could not be generated.");
+      }
+      const blobUrl = URL.createObjectURL(await response.blob());
+      const disposition = response.headers.get("Content-Disposition");
+      const downloadName = disposition?.match(/filename="([^"]+)"/)?.[1] || "clarity-analysis.pdf";
+      const link = document.createElement("a");
+      link.href = blobUrl;
+      link.download = downloadName;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1_000);
+    } catch (exportFailure) {
+      setExportError(exportFailure instanceof Error ? exportFailure.message : "The report could not be generated.");
+    } finally {
+      setExporting(false);
+    }
+  };
   return <main>
     <nav><a className="brand" href="#top"><i>✦</i> Clarity</a><span>AI DOCUMENT ANALYZER</span><a className="privacy" href="#privacy">Privacy first</a></nav>
     <header id="top"><p className="eyebrow">DOCUMENT INTELLIGENCE, MINUS THE JARGON</p><h1>See what your<br /><em>document</em> is really saying.</h1><p className="lede">Upload a policy, agreement, or contract for a concise, evidence-based review of its obligations, risks, and open questions.</p></header>
     <section className="upload-wrap"><div className={`dropzone ${file ? "selected" : ""}`} onDragOver={e => e.preventDefault()} onDrop={onDrop} onClick={() => input.current?.click()}><input ref={input} type="file" accept=".pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" onChange={(e: ChangeEvent<HTMLInputElement>) => choose(e.target.files?.[0])} /><div className="file-icon">⌁</div><div><h2>{file ? file.name : "Drop your document here"}</h2><p>{file ? `${(file.size / 1024 / 1024).toFixed(2)} MB · Ready for analysis` : "or click to browse · PDF, JPG, PNG, or WebP · maximum 15 MB"}</p></div>{file && <button className="clear" onClick={e => { e.stopPropagation(); setFile(null); setResult(null); setProviderQuestions([]); }}>×</button>}</div>
       <button className="analyze" disabled={!file || loading} onClick={upload}>{loading ? <><span className="spinner" /> Analyzing document</> : "Analyze document →"}</button>
       {error && <p className="error" role="alert">{error}</p>}<p className="disclaimer">Clarity explains what appears in your document. It does not provide legal advice.</p></section>
-    {a && <div className="report" aria-live="polite"><div className="report-meta"><span>ANALYSIS COMPLETE</span><span>{file?.name}</span></div><section className="overview"><div><p className="eyebrow">{a.documentType} · {a.confidence}% CONFIDENCE</p><h2>{valid(a.documentPurpose)}</h2><p className="summary">{valid(a.summary)}</p></div><div className={`score ${a.riskLevel.toLowerCase()}`}><strong>{a.riskScore}</strong><span>/100</span><p>{a.riskLevel} risk</p></div></section>
+    {a && <div className="report" ref={report} aria-live="polite"><div className="report-meta"><div><span>ANALYSIS COMPLETE</span><span>{file?.name}</span></div><div className="report-actions" aria-label="Analysis actions"><button type="button" onClick={() => void downloadReport()} disabled={exporting}>{exporting ? "Generating PDF…" : "Download PDF"}</button><button type="button" onClick={() => chat.current?.scrollIntoView({ behavior: "smooth", block: "start" })}>Go to chat</button></div></div>{exportError && <p className="export-error" role="alert">{exportError}</p>}<section className="overview"><div><p className="eyebrow">{a.documentType} · {a.confidence}% CONFIDENCE</p><h2>{valid(a.documentPurpose)}</h2><p className="summary">{valid(a.summary)}</p></div><div className={`score ${a.riskLevel.toLowerCase()}`}><strong>{a.riskScore}</strong><span>/100</span><p>{a.riskLevel} risk</p></div></section>
       <div className="grid"><Section title="Key points" count={a.importantPoints.length}><ItemList items={a.importantPoints} /></Section><Section title="Points in your favor" count={a.pros.length}><ItemList items={a.pros} empty="No clear protections identified." /></Section></div>
       <Section title="Risk areas" count={a.riskAreas.length}>{a.riskAreas.length ? <div className="risk-list">{a.riskAreas.map((risk, index) => <article className="risk" key={`${risk.title}-${index}`}><div><span className={`badge ${risk.severity.toLowerCase()}`}>{risk.severity}</span><h3>{valid(risk.title)}</h3></div><p>{valid(risk.reason)}</p><aside><b>Suggested next step</b>{valid(risk.recommendation)}</aside></article>)}</div> : <p className="empty">No specific risk areas identified.</p>}</Section>
       <div className="grid"><Section title="Potential drawbacks" count={a.cons.length}><ItemList items={a.cons} /></Section><Section title="Information to clarify" count={a.missingInformation.length}>{a.missingInformation.length ? <div className="item-list">{a.missingInformation.map((item, index) => <article className="item" key={`${item.field}-${index}`}><h3>{valid(item.field)}</h3><p>{valid(item.whyImportant)}</p></article>)}</div> : <p className="empty">No missing information identified.</p>}</Section></div>
       <div className="grid"><Section title="Questions to ask the policy provider" count={providerQuestions.length}><div aria-live="polite" aria-atomic="false">{providerQuestions.length ? <ol className="questions">{providerQuestions.map(q => <li key={q}>{q}</li>)}</ol> : <p className="empty">No provider questions identified.</p>}</div></Section><Section title="Suggested actions" count={a.actionItems.length}>{a.actionItems.length ? <ol className="questions">{a.actionItems.map((q, i) => <li key={i}>{valid(q)}</li>)}</ol> : <p className="empty">No actions generated.</p>}</Section></div>
     </div>}
-    {a && file && chatAnalysis && <DocumentChat key={a.documentToken} file={file} documentToken={a.documentToken} documentTokenExpiresAt={a.documentTokenExpiresAt} documentType={a.documentType} analysis={chatAnalysis} onProviderQuestion={captureProviderQuestion} />}
+    {a && file && chatAnalysis && <div ref={chat}><DocumentChat key={a.documentToken} file={file} documentToken={a.documentToken} documentTokenExpiresAt={a.documentTokenExpiresAt} documentType={a.documentType} analysis={chatAnalysis} onProviderQuestion={captureProviderQuestion} /></div>}
     <footer id="privacy"><span>✦ Clarity</span><p>Your uploaded file is used only to produce this analysis.</p></footer>
   </main>;
 }

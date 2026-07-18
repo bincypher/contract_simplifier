@@ -38,6 +38,31 @@ const schema = loadTypeScript("lib/schema.ts", {
 const guardrails = loadTypeScript("lib/chat-guardrails.ts", {
   "@/lib/schema": schema
 });
+const reportExport = loadTypeScript("lib/report-export.ts");
+
+const sampleAnalysis = {
+  documentType: "Privacy Policy",
+  confidence: 91,
+  summary: "The policy permits third-party data sharing and international transfers while leaving several safeguards unclear.",
+  documentPurpose: "Explains how the provider collects, uses, shares, and transfers personal information.",
+  riskScore: 72,
+  riskLevel: "High",
+  pros: [{ title: "Access rights", reason: "Users may request access to their personal information." }],
+  cons: [{ title: "Broad sharing", reason: "Information may be shared with several categories of third parties." }],
+  riskAreas: [{ title: "International transfers", severity: "High", reason: "Equivalent protections are not guaranteed.", recommendation: "Ask which contractual and technical safeguards apply." }],
+  importantPoints: [{ title: "Data sharing", reason: "The provider may disclose information to service and advertising partners." }],
+  painPoints: [{ title: "Unclear retention", reason: "No specific retention period is stated." }],
+  missingInformation: [{ field: "Transfer safeguards", whyImportant: "Users cannot assess protection in other jurisdictions." }],
+  questionsToAsk: ["What safeguards protect personal data during international transfers?"],
+  actionItems: ["Request the complete data-retention schedule."]
+};
+
+if (process.env.CLARITY_EXPORT_QA_DIR) {
+  fs.mkdirSync(process.env.CLARITY_EXPORT_QA_DIR, { recursive: true });
+  reportExport.generatePdfReport(sampleAnalysis, "privacy-policy.pdf").then(pdf => {
+    fs.writeFileSync(path.join(process.env.CLARITY_EXPORT_QA_DIR, "clarity-analysis-privacy-policy.pdf"), pdf);
+  });
+}
 
 test("provider questions are cleaned and deduplicated case-insensitively", () => {
   const questions = behavior.mergeProviderQuestions(
@@ -225,4 +250,19 @@ test("missing-information responses require a reason and provider question", () 
   assert.equal(valid.success, true);
   assert.equal(missingProviderQuestion.success, false);
   assert.equal(misleadingFollowUp.success, false);
+});
+
+test("report filenames are safe and retain a useful document stem", () => {
+  assert.equal(reportExport.reportBaseName("Client Privacy Policy (final).pdf"), "clarity-analysis-Client-Privacy-Policy-final");
+  assert.equal(reportExport.reportBaseName("<>.pdf"), "clarity-analysis-document");
+});
+
+test("PDF export produces a readable multi-section report", async () => {
+  const { PDFDocument } = require("pdf-lib");
+  const bytes = await reportExport.generatePdfReport(sampleAnalysis, "privacy-policy.pdf");
+  const document = await PDFDocument.load(bytes);
+
+  assert.equal(Buffer.from(bytes).subarray(0, 4).toString(), "%PDF");
+  assert.ok(document.getPageCount() >= 1);
+  assert.ok(bytes.length > 2_000);
 });
