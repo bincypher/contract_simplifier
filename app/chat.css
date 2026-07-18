@@ -28,12 +28,18 @@
 .chat-message.user .message-label span,.chat-message.user .message-label b{color:#cae0d8}
 .message-content{font-size:14px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;margin:0}
 .chat-message.assistant .message-content{color:#394843}
+.chat-gap{border-top:1px solid #ded7c5;margin-top:16px;padding-top:15px;display:grid;gap:10px}
+.chat-gap>div,.chat-gap aside{padding:12px 14px;background:#fffdf6}
+.chat-gap aside{border-left:2px solid #aa7a2d}
+.chat-gap strong{display:block;font:500 9px 'DM Mono';letter-spacing:.07em;text-transform:uppercase;color:#7d672f;margin-bottom:6px}
+.chat-gap p{font-size:12px;line-height:1.5;color:#58645e;margin:0}
 .chat-evidence{border-top:1px solid #d9ddd6;margin-top:16px;padding-top:15px;display:grid;gap:8px}
 .chat-evidence>strong{font:500 10px 'DM Mono';letter-spacing:.07em;text-transform:uppercase;color:#2d6656}
 .chat-evidence blockquote{margin:0;background:#fff;border-left:2px solid #d45e35;padding:11px 13px;color:#58645e;font-size:12px;line-height:1.5}
 .chat-evidence blockquote span{display:block;font:500 9px 'DM Mono';letter-spacing:.07em;text-transform:uppercase;color:#c05733;margin-bottom:5px}
 .chat-followups{margin-top:14px}
 .chat-followups button{background:#fff;font-size:11px;padding:8px 10px}
+.chat-suggestions-note{margin:4px 0 22px;padding:12px 14px;border-left:2px solid #2d6656;background:#f1f6f2;color:#52615b;font-size:12px;line-height:1.5}
 .chat-thinking{display:flex;align-items:center;gap:9px;color:#64706a;font-size:13px;padding:10px 2px}
 .chat-thinking .spinner{border-color:#bfd2ca;border-top-color:#275e50}
 .chat-composer{border-top:1px solid #d9ddd6;padding:20px;background:#f4f5ef}

@@ -4,20 +4,26 @@ import {
   FormEvent,
   KeyboardEvent,
   useEffect,
-  useMemo,
   useRef,
   useState
 } from "react";
 import type { ChatAnswer } from "@/lib/chat-guardrails";
+import type { Analysis } from "@/lib/schema";
+import {
+  availableChatSuggestions,
+  buildAnswerableChatSuggestions,
+  markMatchingSuggestionUsed
+} from "@/lib/chat-behavior";
 
 type DisplayMessage = {
   id: string;
   role: "user" | "assistant";
   content: string;
-  state?: "answered" | "not_found" | "rejected" | "error";
+  state?: "answered" | "not_found" | "clarification" | "rejected" | "error";
   evidence?: ChatAnswer["evidence"];
   confidence?: number;
-  followUpQuestions?: string[];
+  gapReason?: string | null;
+  providerQuestion?: string | null;
 };
 
 type RejectedResponse = {
@@ -26,6 +32,8 @@ type RejectedResponse = {
   reasonCode: string;
 };
 
+type ClarificationResponse = { status: "clarification"; message: string };
+
 type ErrorResponse = { error?: string };
 
 type DocumentChatProps = {
@@ -33,7 +41,8 @@ type DocumentChatProps = {
   documentToken: string;
   documentTokenExpiresAt: string;
   documentType: string;
-  suggestedQuestions: string[];
+  analysis: Analysis;
+  onProviderQuestion: (question: string) => void;
 };
 
 function createMessageId() {
@@ -46,6 +55,12 @@ function isRejectedResponse(value: unknown): value is RejectedResponse {
   return candidate.status === "rejected" && typeof candidate.message === "string";
 }
 
+function isClarificationResponse(value: unknown): value is ClarificationResponse {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<ClarificationResponse>;
+  return candidate.status === "clarification" && typeof candidate.message === "string";
+}
+
 function isChatAnswer(value: unknown): value is ChatAnswer {
   if (!value || typeof value !== "object") return false;
   const candidate = value as Partial<ChatAnswer>;
@@ -53,7 +68,9 @@ function isChatAnswer(value: unknown): value is ChatAnswer {
     (candidate.status === "answered" || candidate.status === "not_found") &&
     typeof candidate.answer === "string" &&
     Array.isArray(candidate.evidence) &&
-    Array.isArray(candidate.followUpQuestions)
+    Array.isArray(candidate.followUpQuestions) &&
+    (candidate.gapReason === null || typeof candidate.gapReason === "string") &&
+    (candidate.providerQuestion === null || typeof candidate.providerQuestion === "string")
   );
 }
 
@@ -62,24 +79,18 @@ export function DocumentChat({
   documentToken,
   documentTokenExpiresAt,
   documentType,
-  suggestedQuestions
+  analysis,
+  onProviderQuestion
 }: DocumentChatProps) {
   const [messages, setMessages] = useState<DisplayMessage[]>([]);
   const [question, setQuestion] = useState("");
+  const [usedSuggestionKeys, setUsedSuggestionKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const activeRequest = useRef<AbortController | null>(null);
 
-  const suggestions = useMemo(() => {
-    const defaults = [
-      "What are my main obligations?",
-      "What termination or renewal terms should I notice?",
-      "What important information is missing?"
-    ];
-    return [...new Set([...suggestedQuestions, ...defaults])]
-      .filter(item => item.trim().length > 1)
-      .slice(0, 3);
-  }, [suggestedQuestions]);
+  const suggestions = buildAnswerableChatSuggestions(analysis);
+  const remainingSuggestions = availableChatSuggestions(suggestions, usedSuggestionKeys);
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
@@ -128,6 +139,7 @@ export function DocumentChat({
       form.append("documentToken", documentToken);
       form.append("question", trimmedQuestion);
       form.append("history", JSON.stringify(history));
+      form.append("analysis", JSON.stringify(analysis));
 
       const response = await fetch("/api/chat", {
         method: "POST",
@@ -159,9 +171,22 @@ export function DocumentChat({
         ]);
         return;
       }
+      if (isClarificationResponse(body)) {
+        setMessages(current => [
+          ...current,
+          { id: createMessageId(), role: "assistant", content: body.message, state: "clarification" }
+        ]);
+        return;
+      }
       if (!isChatAnswer(body)) {
         throw new Error("The chat service returned an invalid answer.");
       }
+      if (body.status === "not_found" && body.providerQuestion) {
+        onProviderQuestion(body.providerQuestion);
+      }
+      setUsedSuggestionKeys(current =>
+        markMatchingSuggestionUsed(current, trimmedQuestion, suggestions)
+      );
 
       setMessages(current => [
         ...current,
@@ -172,7 +197,8 @@ export function DocumentChat({
           state: body.status,
           evidence: body.evidence,
           confidence: body.confidence,
-          followUpQuestions: body.followUpQuestions
+          gapReason: body.gapReason,
+          providerQuestion: body.providerQuestion
         }
       ]);
     } catch (error) {
@@ -209,7 +235,7 @@ export function DocumentChat({
           <p className="eyebrow">GROUNDED DOCUMENT Q&amp;A</p>
           <h2 id="document-chat-title">Ask Clarity about this document.</h2>
           <p>
-            Answers are restricted to <strong>{file.name}</strong> and include document evidence when available.
+            Ask about <strong>{file.name}</strong> or any finding in its generated analysis.
           </p>
         </div>
         <div className="chat-status">
@@ -223,8 +249,8 @@ export function DocumentChat({
           {messages.length === 0 && (
             <div className="chat-welcome">
               <span>✦</span>
-              <h3>Start with a document-specific question</h3>
-              <p>I will answer only from the uploaded document. Unrelated or unsupported requests are declined.</p>
+              <h3>Ask about the document or its analysis</h3>
+              <p>I can explain the risk score, findings, action items, and document terms. If a question is unclear, I will ask what you mean.</p>
               <div className="chat-suggestions">
                 {suggestions.map(suggestion => (
                   <button
@@ -248,13 +274,27 @@ export function DocumentChat({
               <div className="message-label">
                 <span>{message.role === "user" ? "You" : "Clarity"}</span>
                 {message.state === "rejected" && <b>Outside document scope</b>}
-                {message.state === "not_found" && <b>Not found in document</b>}
+                {message.state === "clarification" && <b>Clarification needed</b>}
+                {message.state === "not_found" && <b>Policy clarification needed</b>}
                 {message.state === "error" && <b>Could not complete</b>}
                 {message.state === "answered" && message.confidence !== undefined && (
                   <b>{message.confidence}% grounded confidence</b>
                 )}
               </div>
               <p className="message-content">{message.content}</p>
+
+              {message.state === "not_found" && message.gapReason && message.providerQuestion && (
+                <div className="chat-gap">
+                  <div>
+                    <strong>Why this matters</strong>
+                    <p>{message.gapReason}</p>
+                  </div>
+                  <aside>
+                    <strong>Added to questions for the policy provider</strong>
+                    <p>{message.providerQuestion}</p>
+                  </aside>
+                </div>
+              )}
 
               {!!message.evidence?.length && (
                 <div className="chat-evidence">
@@ -268,22 +308,28 @@ export function DocumentChat({
                 </div>
               )}
 
-              {!!message.followUpQuestions?.length && (
-                <div className="chat-followups" aria-label="Suggested follow-up questions">
-                  {message.followUpQuestions.map(followUp => (
-                    <button
-                      type="button"
-                      key={followUp}
-                      onClick={() => void askQuestion(followUp)}
-                      disabled={loading}
-                    >
-                      {followUp}
-                    </button>
-                  ))}
-                </div>
-              )}
             </article>
           ))}
+
+          {!loading && messages.length > 0 && remainingSuggestions.length > 0 && (
+            <div className="chat-followups" aria-label="Suggested follow-up questions">
+              {remainingSuggestions.map(suggestion => (
+                <button
+                  type="button"
+                  key={suggestion}
+                  onClick={() => void askQuestion(suggestion)}
+                >
+                  {suggestion}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {!loading && messages.length > 0 && remainingSuggestions.length === 0 && (
+            <p className="chat-suggestions-note">
+              You can ask anything else about the document or its analysis.
+            </p>
+          )}
 
           {loading && (
             <div className="chat-thinking" aria-label="Clarity is checking the document">
@@ -294,13 +340,13 @@ export function DocumentChat({
         </div>
 
         <form className="chat-composer" onSubmit={submitQuestion}>
-          <label htmlFor="document-question">Ask only about this document</label>
+          <label htmlFor="document-question">Ask about this document or its analysis</label>
           <textarea
             id="document-question"
             value={question}
             maxLength={500}
             rows={3}
-            placeholder="For example: What happens if I terminate this agreement?"
+            placeholder="For example: Why did this analysis assign a high risk score?"
             onChange={event => setQuestion(event.target.value)}
             onKeyDown={handleKeyDown}
             aria-describedby="document-question-help"
@@ -312,7 +358,10 @@ export function DocumentChat({
               <button
                 type="button"
                 className="chat-clear"
-                onClick={() => setMessages([])}
+                onClick={() => {
+                  setMessages([]);
+                  setUsedSuggestionKeys([]);
+                }}
                 disabled={loading}
               >
                 Clear chat
@@ -323,13 +372,13 @@ export function DocumentChat({
               className="chat-send"
               disabled={loading || question.trim().length < 2}
             >
-              {loading ? "Checking…" : "Ask document →"}
+              {loading ? "Checking…" : "Ask Clarity →"}
             </button>
           </div>
         </form>
       </div>
       <p className="chat-disclaimer">
-        Clarity explains the uploaded document and does not provide legal advice. Verify important decisions with a qualified professional.
+        Clarity explains the uploaded document and its generated analysis but does not provide legal advice. Verify important decisions with a qualified professional.
       </p>
     </section>
   );

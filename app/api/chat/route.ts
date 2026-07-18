@@ -39,9 +39,15 @@ export const dynamic = "force-dynamic";
 const MAX_DOCUMENT_CHARS = 120_000;
 const MIN_RELEVANCE_CONFIDENCE = 70;
 
-function conversationContext(question: string, history: ChatHistory, token: DocumentTokenPayload) {
+function conversationContext(
+  question: string,
+  history: ChatHistory,
+  token: DocumentTokenPayload,
+  analysis: ReturnType<typeof parseChatRequest>["analysis"]
+) {
   return [
     `Approved document type: ${token.documentType}`,
+    `Untrusted generated analysis shown to the user: ${JSON.stringify(analysis)}`,
     `Untrusted conversation history: ${JSON.stringify(history)}`,
     `Untrusted current question: ${JSON.stringify(question)}`
   ].join("\n");
@@ -51,9 +57,10 @@ function documentQuestionContent(
   document: IngestedDocument,
   question: string,
   history: ChatHistory,
-  token: DocumentTokenPayload
+  token: DocumentTokenPayload,
+  analysis: ReturnType<typeof parseChatRequest>["analysis"]
 ): ChatCompletionUserMessageParam["content"] {
-  const context = conversationContext(question, history, token);
+  const context = conversationContext(question, history, token, analysis);
   if (document.kind === "text") {
     return `${context}\n\n<untrusted_document_content>\n${document.text.slice(0, MAX_DOCUMENT_CHARS)}\n</untrusted_document_content>`;
   }
@@ -87,6 +94,10 @@ function rejectedResponse(reasonCode: string = "blocked") {
     message: CHAT_REJECTION_MESSAGE,
     reasonCode
   });
+}
+
+function clarificationResponse(message: string) {
+  return NextResponse.json({ status: "clarification", message });
 }
 
 function guardErrorResponse(error: RequestGuardError) {
@@ -133,7 +144,8 @@ export async function POST(request: Request) {
       document,
       chatRequest.question,
       chatRequest.history,
-      token
+      token,
+      chatRequest.analysis
     );
 
     const relevanceCompletion = await client.chat.completions.create({
@@ -163,12 +175,13 @@ export async function POST(request: Request) {
       relevance = { ...relevance, confidence: relevance.confidence * 100 };
     }
     if (process.env.NODE_ENV !== "production") console.debug("[chat] parsed relevance:", relevance);
-    if (
-      !relevance.isDocumentRelated ||
-      relevance.category === "unsupported" ||
-      relevance.reasonCode !== "related" ||
-      relevance.confidence < MIN_RELEVANCE_CONFIDENCE
-    ) {
+    if (relevance.reasonCode === "unclear" || (relevance.isDocumentRelated && relevance.confidence < MIN_RELEVANCE_CONFIDENCE)) {
+      return clarificationResponse(
+        relevance.clarificationQuestion ||
+          "Could you clarify which part of the document or generated analysis you want me to explain?"
+      );
+    }
+    if (!relevance.isDocumentRelated || relevance.category === "unsupported" || relevance.reasonCode !== "related") {
       return rejectedResponse(relevance.reasonCode);
     }
 
