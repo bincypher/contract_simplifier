@@ -178,7 +178,7 @@ export async function POST(request: Request) {
     if (relevance.reasonCode === "unclear" || (relevance.isDocumentRelated && relevance.confidence < MIN_RELEVANCE_CONFIDENCE)) {
       return clarificationResponse(
         relevance.clarificationQuestion ||
-          "Could you clarify which part of the document or generated analysis you want me to explain?"
+        "Could you clarify which part of the document or generated analysis you want me to explain?"
       );
     }
     if (!relevance.isDocumentRelated || relevance.category === "unsupported" || relevance.reasonCode !== "related") {
@@ -207,6 +207,15 @@ export async function POST(request: Request) {
     if (process.env.NODE_ENV !== "production") console.debug("[chat] rawAnswer:", rawAnswer);
     if (!rawAnswer) throw new Error("The model returned no document answer.");
     let parsed = chatAnswerSchema.parse(JSON.parse(rawAnswer));
+    if (parsed.status === "answered" && parsed.evidence.length === 0 && relevance.category !== "analysis") {
+      throw new z.ZodError([
+        {
+          code: z.ZodIssueCode.custom,
+          path: ["evidence"],
+          message: "Answered responses require document evidence."
+        }
+      ]);
+    }
     // Normalize confidence if model returned 0-1 float
     if (typeof parsed.confidence === "number" && parsed.confidence <= 1) {
       parsed = { ...parsed, confidence: parsed.confidence * 100 };
