@@ -93,7 +93,9 @@ export function DocumentChat({
   const remainingSuggestions = availableChatSuggestions(suggestions, usedSuggestionKeys);
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    if (messages.length > 0 || loading) {
+      endRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    }
   }, [messages, loading]);
 
   useEffect(() => () => activeRequest.current?.abort(), []);
