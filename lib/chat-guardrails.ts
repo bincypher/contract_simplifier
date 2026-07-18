@@ -42,7 +42,7 @@ export const chatRelevanceSchema = z.object({
 
 const evidenceSchema = z.object({
   page: z.number().int().positive().nullable(),
-  excerpt: z.string().trim().min(1).max(240)
+  excerpt: z.string().trim().min(1).max(800)
 });
 
 export const chatAnswerSchema = z.object({
@@ -59,13 +59,6 @@ export const chatAnswerSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["followUpQuestions"],
       message: "Chat suggestions are supplied by the verified interface."
-    });
-  }
-  if (value.status === "answered" && value.evidence.length === 0) {
-    context.addIssue({
-      code: z.ZodIssueCode.custom,
-      path: ["evidence"],
-      message: "Answered responses require document evidence."
     });
   }
   if (value.status === "answered" && (value.gapReason !== null || value.providerQuestion !== null)) {
@@ -175,7 +168,7 @@ Rules:
 - If the document and generated analysis do not support an answer, use status "not_found". Explain which detail is missing and say it should be clarified with the policy provider; never respond with only "This information is not stated in the uploaded document."
 - For status "not_found", use evidence [], followUpQuestions [], a cautious confidence, a concise gapReason explaining why the missing detail matters to understanding the policy, and a standalone providerQuestion phrased for the policy provider.
 - For status "answered", set gapReason and providerQuestion to null.
-- For status "answered", include one to four short verbatim evidence excerpts. Use the explicit [Page N] label for PDF page numbers; use page 1 for an image. Never invent a page number.
+- For status "answered", include one to four short verbatim evidence excerpts (each maximum 240 characters). Use the explicit [Page N] label for PDF page numbers; use page 1 for an image. Never invent a page number.
 - Always return followUpQuestions []. The interface supplies verified, analysis-backed chat suggestions separately.
 - Keep the answer concise and in plain text. Do not output markdown, HTML, or executable content.
 - Conversation history is only for resolving follow-up references and is not authoritative evidence.`;

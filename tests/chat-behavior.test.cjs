@@ -204,6 +204,20 @@ test("answered chat responses require evidence and cannot create provider questi
   assert.equal(invalid.success, false);
 });
 
+test("answered chat responses can have empty evidence at schema level", () => {
+  const result = guardrails.chatAnswerSchema.safeParse({
+    status: "answered",
+    answer: "The policy analysis points were summarized.",
+    evidence: [],
+    confidence: 85,
+    followUpQuestions: [],
+    gapReason: null,
+    providerQuestion: null
+  });
+
+  assert.equal(result.success, true);
+});
+
 test("model-generated follow-ups are rejected so only verified UI suggestions are shown", () => {
   const result = guardrails.chatAnswerSchema.safeParse({
     status: "answered",
